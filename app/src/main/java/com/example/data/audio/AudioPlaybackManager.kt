@@ -32,6 +32,17 @@ class AudioPlaybackManager(
     private var audioTrack: AudioTrack? = null
     private val audioQueue = LinkedBlockingQueue<ByteArray>()
     private var playbackJob: Job? = null
+    private var preferredDevice: android.media.AudioDeviceInfo? = null
+
+    fun updatePreferredDevice(device: android.media.AudioDeviceInfo?) {
+        preferredDevice = device
+        try {
+            audioTrack?.setPreferredDevice(device)
+            Log.d(tag, "Updated AudioTrack preferred output device to: ${device?.productName}")
+        } catch (e: Exception) {
+            Log.w(tag, "Failed to set preferred device on AudioTrack", e)
+        }
+    }
 
     private val _isPlaying = MutableStateFlow(false)
     val isPlaying: StateFlow<Boolean> = _isPlaying.asStateFlow()
@@ -58,7 +69,7 @@ class AudioPlaybackManager(
             audioTrack = AudioTrack.Builder()
                 .setAudioAttributes(
                     AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
                         .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                         .build()
                 )
@@ -72,6 +83,14 @@ class AudioPlaybackManager(
                 .setBufferSizeInBytes(minBufferSize * 2)
                 .setTransferMode(AudioTrack.MODE_STREAM)
                 .build()
+
+            preferredDevice?.let {
+                try {
+                    audioTrack?.setPreferredDevice(it)
+                } catch (e: Exception) {
+                    Log.w(tag, "Could not set preferred device on initial AudioTrack start", e)
+                }
+            }
 
             audioTrack?.play()
         } catch (e: Exception) {

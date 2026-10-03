@@ -16,6 +16,7 @@ import android.os.IBinder
 import android.util.Log
 import androidx.core.app.ServiceCompat
 import com.example.BuildConfig
+import com.example.data.audio.AudioDeviceManager
 import com.example.data.gemini.LiveSessionManager
 import com.example.domain.models.ZoyaState
 import com.example.security.PrivacyManager
@@ -39,6 +40,7 @@ class BackgroundAudioService : Service(), AudioManager.OnAudioFocusChangeListene
     var liveSessionManager: LiveSessionManager? = null
         private set
 
+    private var audioDeviceManager: AudioDeviceManager? = null
     private var audioManager: AudioManager? = null
     private var audioFocusRequest: AudioFocusRequest? = null
 
@@ -47,8 +49,7 @@ class BackgroundAudioService : Service(), AudioManager.OnAudioFocusChangeListene
         override fun onReceive(context: Context?, intent: Intent?) {
             when (intent?.action) {
                 AudioManager.ACTION_AUDIO_BECOMING_NOISY -> {
-                    Log.d(tag, "Headset unplugged - pausing playback")
-                    liveSessionManager?.onUserInterruption()
+                    Log.d(tag, "Headset/Buds unplugged - seamlessly routing to phone speaker so Zoya keeps speaking")
                 }
                 Intent.ACTION_HEADSET_PLUG -> {
                     val state = intent.getIntExtra("state", -1)
@@ -109,9 +110,14 @@ class BackgroundAudioService : Service(), AudioManager.OnAudioFocusChangeListene
             }
         }
 
+        audioDeviceManager = AudioDeviceManager(applicationContext).apply {
+            startMonitoring()
+        }
+
         liveSessionManager = LiveSessionManager(
             context = applicationContext,
-            apiKey = apiKey
+            apiKey = apiKey,
+            audioDeviceManager = audioDeviceManager
         )
 
         // Setup local wake-word listener trigger
@@ -244,6 +250,7 @@ class BackgroundAudioService : Service(), AudioManager.OnAudioFocusChangeListene
             // Already unregistered
         }
         abandonAudioFocus()
+        audioDeviceManager?.stopMonitoring()
         liveSessionManager?.release()
         serviceScope.cancel()
         super.onDestroy()

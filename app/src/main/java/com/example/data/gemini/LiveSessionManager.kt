@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.example.data.audio.AudioBufferManager
 import com.example.data.audio.AudioCaptureManager
+import com.example.data.audio.AudioDeviceManager
 import com.example.data.audio.AudioPlaybackManager
 import com.example.data.audio.SoftwareWakeWordDetector
 import com.example.data.audio.WakeWordDetector
@@ -28,7 +29,8 @@ import kotlinx.coroutines.launch
 class LiveSessionManager(
     private val context: Context,
     private val apiKey: String,
-    private val config: LiveSessionConfig = LiveSessionConfig()
+    private val config: LiveSessionConfig = LiveSessionConfig(),
+    val audioDeviceManager: AudioDeviceManager? = null
 ) {
     private val tag = "LiveSessionManager"
 
@@ -36,6 +38,15 @@ class LiveSessionManager(
     val audioPlaybackManager = AudioPlaybackManager(context = context, sampleRate = config.sampleRateOutput)
     val audioBufferManager = AudioBufferManager()
     val wakeWordDetector: WakeWordDetector = SoftwareWakeWordDetector()
+
+    init {
+        audioDeviceManager?.addRouteChangeListener { inputDev, outputDev ->
+            audioCaptureManager.updatePreferredDevice(inputDev)
+            audioPlaybackManager.updatePreferredDevice(outputDev)
+        }
+        audioCaptureManager.updatePreferredDevice(audioDeviceManager?.getPreferredInputDevice())
+        audioPlaybackManager.updatePreferredDevice(audioDeviceManager?.getPreferredOutputDevice())
+    }
 
     private val _zoyaState = MutableStateFlow(ZoyaState.IDLE)
     val zoyaState: StateFlow<ZoyaState> = _zoyaState.asStateFlow()

@@ -107,6 +107,9 @@ fun LiveVoiceScreen(
     val incomingCall by viewModel.incomingCall.collectAsState()
     val pendingConfirmation by viewModel.pendingConfirmation.collectAsState()
     val announcementText by viewModel.announcementText.collectAsState()
+    val activeAudioRoute by viewModel.activeAudioRoute.collectAsState()
+    val isBluetoothConnected by viewModel.isBluetoothConnected.collectAsState()
+    val startupState by viewModel.startupState.collectAsState()
 
     var showTextInputDialog by remember { mutableStateOf(false) }
     var textPromptInput by remember { mutableStateOf("") }
@@ -114,6 +117,7 @@ fun LiveVoiceScreen(
     val characterRenderer = remember { ComposeZoyaCharacterRenderer() }
 
     val quickChips = listOf(
+        "Zoya Intro 🎙️" to "intro",
         "YouTube kholo ▶" to "YouTube kholo",
         "WhatsApp kholo 💬" to "WhatsApp kholo",
         "Messages padho 🔔" to "Jo notification aayi hai batao",
@@ -200,6 +204,22 @@ fun LiveVoiceScreen(
                     }
                 }
 
+                // Audio Route Badge (Bluetooth Earbuds vs Phone Speaker)
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(if (isBluetoothConnected) NeonCyan.copy(alpha = 0.2f) else DarkSurfaceElevated)
+                        .border(1.dp, if (isBluetoothConnected) NeonCyan.copy(alpha = 0.6f) else DarkSurfaceHighlight, RoundedCornerShape(14.dp))
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = if (isBluetoothConnected) "🎧 Earbuds" else "🔊 Speaker",
+                        color = if (isBluetoothConnected) NeonCyan else TextSecondary,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+
                 // Controls: Mode switch & Privacy Settings
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     // Mode Switch: Anime Character vs Cyber Orb
@@ -235,6 +255,26 @@ fun LiveVoiceScreen(
                             tint = NeonMagenta
                         )
                     }
+                }
+            }
+
+            // STARTUP INTRODUCTION BANNER
+            if (startupState == com.example.domain.models.ZoyaStartupState.SPEAKING_INTRO) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(NeonCyan.copy(alpha = 0.15f))
+                        .border(1.dp, NeonCyan.copy(alpha = 0.4f), RoundedCornerShape(12.dp))
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                ) {
+                    Text(
+                        text = "✨ Zoya is introducing herself...",
+                        color = NeonCyan,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium
+                    )
                 }
             }
 

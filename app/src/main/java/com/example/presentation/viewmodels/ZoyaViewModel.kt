@@ -1,15 +1,20 @@
 package com.example.presentation.viewmodels
 
 import android.app.Application
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.BuildConfig
+import com.example.data.audio.AudioDeviceManager
+import com.example.data.audio.ZoyaVoiceConstants
+import com.example.data.audio.ZoyaVoiceSpeaker
 import com.example.data.gemini.LiveSessionManager
 import com.example.domain.models.ConfirmationLevel
 import com.example.domain.models.LiveSessionConfig
 import com.example.domain.models.PendingAction
 import com.example.domain.models.ZoyaEmotion
 import com.example.domain.models.ZoyaPersonality
+import com.example.domain.models.ZoyaStartupState
 import com.example.domain.models.ZoyaState
 import com.example.domain.models.ZoyaToolCall
 import com.example.security.PermissionManager
@@ -24,6 +29,7 @@ import com.example.services.ZoyaAccessibilityService
 import com.example.services.ZoyaNotificationItem
 import com.example.services.ZoyaNotificationListenerService
 import com.example.tools.ToolExecutionEngine
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -45,6 +51,20 @@ class ZoyaViewModel(application: Application) : AndroidViewModel(application) {
     val privacyManager = PrivacyManager(application)
     val voiceIdentityManager = VoiceIdentityManager(application)
     val callAssistantManager = CallAssistantManager(application)
+
+    val audioDeviceManager = AudioDeviceManager(application).apply {
+        startMonitoring()
+    }
+
+    val isBluetoothConnected: StateFlow<Boolean> = audioDeviceManager.isBluetoothConnected
+    val activeAudioRoute: StateFlow<String> = audioDeviceManager.activeRouteName
+
+    val voiceSpeaker = ZoyaVoiceSpeaker(application, viewModelScope, audioDeviceManager)
+
+    private val _startupState = MutableStateFlow(ZoyaStartupState.NOT_STARTED)
+    val startupState: StateFlow<ZoyaStartupState> = _startupState.asStateFlow()
+
+    private var hasSpokenStartupIntro = false
 
     private val _pendingConfirmation = MutableStateFlow<PendingAction?>(null)
     val pendingConfirmation: StateFlow<PendingAction?> = _pendingConfirmation.asStateFlow()
@@ -69,21 +89,60 @@ class ZoyaViewModel(application: Application) : AndroidViewModel(application) {
     init {
         IncomingCallReceiver.callAssistantManager = callAssistantManager
 
+        // Trigger startup introduction once per application session
+        triggerStartupIntroIfNeeded()
+
         // Listen for screen safety warnings
         ZoyaAccessibilityService.screenWarnings.onEach { warning ->
             if (privacyManager.isCapabilityEnabled("screen_assistant", false)) {
                 _announcementText.value = warning.warningText
+                voiceSpeaker.speakText(warning.warningText)
                 liveSessionManager.sendTextPrompt("Screen alert warning: ${warning.warningText}")
             }
         }.launchIn(viewModelScope)
 
-        // Listen for new notifications
+        // Listen for new notifications and announce
         ZoyaNotificationListenerService.newNotificationEvents.onEach { notif ->
             if (privacyManager.isCapabilityEnabled("notification_access", false)) {
                 val announcement = "Tumhe ${notif.appDisplayName} pe ${notif.sender} ka message aaya hai."
                 _announcementText.value = announcement
+                voiceSpeaker.speakText(announcement)
             }
         }.launchIn(viewModelScope)
+
+        // Listen for incoming calls and announce
+        callAssistantManager.currentCall.onEach { call ->
+            if (call != null && call.isRinging) {
+                val text = "Tumhe ${call.callerName} ka call aa raha hai. Pick karna hai ya disconnect?"
+                voiceSpeaker.speakText(text)
+            }
+        }.launchIn(viewModelScope)
+    }
+
+    fun triggerStartupIntroIfNeeded() {
+        if (hasSpokenStartupIntro) return
+        hasSpokenStartupIntro = true
+
+        viewModelScope.launch {
+            _startupState.value = ZoyaStartupState.INITIALIZING
+            try {
+                audioDeviceManager.updateAudioRoute()
+                _startupState.value = ZoyaStartupState.WAITING_FOR_AUDIO
+                delay(350)
+
+                _startupState.value = ZoyaStartupState.SPEAKING_INTRO
+                voiceSpeaker.speakIntro(ZoyaVoiceConstants.DEFAULT_STARTUP_INTRO) {
+                    _startupState.value = ZoyaStartupState.READY
+                    if (permissionManager.isGranted(PermissionRequirement.Microphone)) {
+                        startVoiceSession()
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("ZoyaViewModel", "Error in startup sequence", e)
+                _startupState.value = ZoyaStartupState.FAILED
+                _startupState.value = ZoyaStartupState.READY
+            }
+        }
     }
 
     private fun resolveApiKey(): String {
@@ -105,7 +164,8 @@ class ZoyaViewModel(application: Application) : AndroidViewModel(application) {
         config = LiveSessionConfig(
             model = "gemini-3.1-flash-live-preview",
             voiceName = "Aoede"
-        )
+        ),
+        audioDeviceManager = audioDeviceManager
     )
 
     fun saveApiKey(newKey: String) {
@@ -125,6 +185,9 @@ class ZoyaViewModel(application: Application) : AndroidViewModel(application) {
 
     val inputAmplitude: StateFlow<Float> = liveSessionManager.audioCaptureManager.inputAmplitude
     val outputAmplitude: StateFlow<Float> = liveSessionManager.audioPlaybackManager.outputAmplitude
+        .combine(voiceSpeaker.speechAmplitude) { liveAmp, ttsAmp ->
+            maxOf(liveAmp, ttsAmp)
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, 0f)
 
     private val _presentationMode = MutableStateFlow(PresentationMode.ANIME_AVATAR)
     val presentationMode: StateFlow<PresentationMode> = _presentationMode.asStateFlow()
@@ -171,8 +234,17 @@ class ZoyaViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun interruptZoya() {
+        voiceSpeaker.stop()
         liveSessionManager.onUserInterruption()
         toolExecutionEngine.executeTool(ZoyaToolCall("stop", "stop", emptyMap()))
+    }
+
+    fun speakIntro() {
+        voiceSpeaker.speakIntro()
+    }
+
+    fun speakText(text: String) {
+        voiceSpeaker.speakText(text)
     }
 
     fun toggleMute() {
@@ -190,6 +262,9 @@ class ZoyaViewModel(application: Application) : AndroidViewModel(application) {
 
         // Check for local Cross-App & Tool shortcuts
         when {
+            lower == "intro" || lower.contains("intro") -> {
+                speakIntro()
+            }
             lower.contains("youtube") && (lower.contains("kholo") || lower.contains("open")) -> {
                 val res = toolExecutionEngine.executeTool(ZoyaToolCall("1", "openApp", mapOf("appName" to "youtube")))
                 liveSessionManager.sendTextPrompt("Opened YouTube: ${res.message}")
@@ -285,6 +360,8 @@ class ZoyaViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     override fun onCleared() {
+        audioDeviceManager.stopMonitoring()
+        voiceSpeaker.release()
         liveSessionManager.release()
         super.onCleared()
     }

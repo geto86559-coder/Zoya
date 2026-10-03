@@ -34,6 +34,17 @@ class AudioCaptureManager(
 
     private var audioRecord: AudioRecord? = null
     private var recordingJob: Job? = null
+    private var preferredDevice: android.media.AudioDeviceInfo? = null
+
+    fun updatePreferredDevice(device: android.media.AudioDeviceInfo?) {
+        preferredDevice = device
+        try {
+            audioRecord?.setPreferredDevice(device)
+            Log.d(tag, "Updated AudioRecord preferred input device to: ${device?.productName}")
+        } catch (e: Exception) {
+            Log.w(tag, "Failed to set preferred device on AudioRecord", e)
+        }
+    }
 
     private val _audioChunks = MutableSharedFlow<AudioChunk>(extraBufferCapacity = 64)
     val audioChunks: SharedFlow<AudioChunk> = _audioChunks.asSharedFlow()
@@ -77,6 +88,14 @@ class AudioCaptureManager(
             if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
                 Log.e(tag, "AudioRecord failed to initialize")
                 return
+            }
+
+            preferredDevice?.let {
+                try {
+                    audioRecord?.setPreferredDevice(it)
+                } catch (e: Exception) {
+                    Log.w(tag, "Could not set preferred device on initial start", e)
+                }
             }
 
             audioRecord?.startRecording()
