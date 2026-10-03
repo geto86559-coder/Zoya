@@ -5,19 +5,32 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.BuildConfig
 import com.example.data.gemini.LiveSessionManager
+import com.example.domain.models.ConfirmationLevel
 import com.example.domain.models.LiveSessionConfig
+import com.example.domain.models.PendingAction
 import com.example.domain.models.ZoyaEmotion
 import com.example.domain.models.ZoyaPersonality
 import com.example.domain.models.ZoyaState
+import com.example.domain.models.ZoyaToolCall
 import com.example.security.PermissionManager
 import com.example.security.PermissionRequirement
 import com.example.security.PrivacyManager
+import com.example.security.VoiceIdentityManager
 import com.example.services.BackgroundAudioService
+import com.example.services.CallAssistantManager
+import com.example.services.IncomingCallInfo
+import com.example.services.IncomingCallReceiver
+import com.example.services.ZoyaAccessibilityService
+import com.example.services.ZoyaNotificationItem
+import com.example.services.ZoyaNotificationListenerService
+import com.example.tools.ToolExecutionEngine
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -30,6 +43,48 @@ class ZoyaViewModel(application: Application) : AndroidViewModel(application) {
 
     val permissionManager = PermissionManager(application)
     val privacyManager = PrivacyManager(application)
+    val voiceIdentityManager = VoiceIdentityManager(application)
+    val callAssistantManager = CallAssistantManager(application)
+
+    private val _pendingConfirmation = MutableStateFlow<PendingAction?>(null)
+    val pendingConfirmation: StateFlow<PendingAction?> = _pendingConfirmation.asStateFlow()
+
+    private val _isBusy = MutableStateFlow(false)
+    val isBusy: StateFlow<Boolean> = _isBusy.asStateFlow()
+
+    private val _announcementText = MutableStateFlow<String?>(null)
+    val announcementText: StateFlow<String?> = _announcementText.asStateFlow()
+
+    val isScreenAssistantActive: StateFlow<Boolean> = ZoyaAccessibilityService.isServiceActive
+    val incomingCall: StateFlow<IncomingCallInfo?> = callAssistantManager.currentCall
+
+    val toolExecutionEngine = ToolExecutionEngine(
+        context = application,
+        onConfirmationRequired = { action ->
+            _pendingConfirmation.value = action
+        },
+        callAssistantManager = callAssistantManager
+    )
+
+    init {
+        IncomingCallReceiver.callAssistantManager = callAssistantManager
+
+        // Listen for screen safety warnings
+        ZoyaAccessibilityService.screenWarnings.onEach { warning ->
+            if (privacyManager.isCapabilityEnabled("screen_assistant", false)) {
+                _announcementText.value = warning.warningText
+                liveSessionManager.sendTextPrompt("Screen alert warning: ${warning.warningText}")
+            }
+        }.launchIn(viewModelScope)
+
+        // Listen for new notifications
+        ZoyaNotificationListenerService.newNotificationEvents.onEach { notif ->
+            if (privacyManager.isCapabilityEnabled("notification_access", false)) {
+                val announcement = "Tumhe ${notif.appDisplayName} pe ${notif.sender} ka message aaya hai."
+                _announcementText.value = announcement
+            }
+        }.launchIn(viewModelScope)
+    }
 
     private fun resolveApiKey(): String {
         val custom = privacyManager.getCustomApiKey()
@@ -84,7 +139,7 @@ class ZoyaViewModel(application: Application) : AndroidViewModel(application) {
     val greetingMessage: StateFlow<String> = _greetingMessage.asStateFlow()
 
     val hasMicPermission: StateFlow<Boolean> = permissionManager.permissionStates
-        .combine(MutableStateFlow(Unit)) { states, _ ->
+        .combine(MutableStateFlow(Unit)) { _, _ ->
             permissionManager.isGranted(PermissionRequirement.Microphone)
         }.stateIn(viewModelScope, SharingStarted.Eagerly, permissionManager.isGranted(PermissionRequirement.Microphone))
 
@@ -98,7 +153,6 @@ class ZoyaViewModel(application: Application) : AndroidViewModel(application) {
 
     fun startVoiceSession() {
         if (!permissionManager.isGranted(PermissionRequirement.Microphone)) {
-            // Cannot start without mic
             return
         }
         _isSessionActive.value = true
@@ -118,6 +172,7 @@ class ZoyaViewModel(application: Application) : AndroidViewModel(application) {
 
     fun interruptZoya() {
         liveSessionManager.onUserInterruption()
+        toolExecutionEngine.executeTool(ZoyaToolCall("stop", "stop", emptyMap()))
     }
 
     fun toggleMute() {
@@ -130,8 +185,95 @@ class ZoyaViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun sendTextCommand(text: String) {
-        liveSessionManager.sendTextPrompt(text)
+    fun handleVoiceOrTextCommand(commandText: String) {
+        val lower = commandText.lowercase().trim()
+
+        // Check for local Cross-App & Tool shortcuts
+        when {
+            lower.contains("youtube") && (lower.contains("kholo") || lower.contains("open")) -> {
+                val res = toolExecutionEngine.executeTool(ZoyaToolCall("1", "openApp", mapOf("appName" to "youtube")))
+                liveSessionManager.sendTextPrompt("Opened YouTube: ${res.message}")
+            }
+            lower.contains("whatsapp") && (lower.contains("kholo") || lower.contains("open")) -> {
+                val res = toolExecutionEngine.executeTool(ZoyaToolCall("2", "openApp", mapOf("appName" to "whatsapp")))
+                liveSessionManager.sendTextPrompt("Opened WhatsApp: ${res.message}")
+            }
+            lower.contains("telegram") && (lower.contains("kholo") || lower.contains("open")) -> {
+                val res = toolExecutionEngine.executeTool(ZoyaToolCall("3", "openApp", mapOf("appName" to "telegram")))
+                liveSessionManager.sendTextPrompt("Opened Telegram: ${res.message}")
+            }
+            lower.contains("instagram") && (lower.contains("kholo") || lower.contains("open")) -> {
+                val res = toolExecutionEngine.executeTool(ZoyaToolCall("4", "openApp", mapOf("appName" to "instagram")))
+                liveSessionManager.sendTextPrompt("Opened Instagram: ${res.message}")
+            }
+            lower.contains("calculator") && (lower.contains("kholo") || lower.contains("open")) -> {
+                val res = toolExecutionEngine.executeTool(ZoyaToolCall("5", "openApp", mapOf("appName" to "calculator")))
+                liveSessionManager.sendTextPrompt("Opened Calculator: ${res.message}")
+            }
+            lower.contains("chrome") && (lower.contains("kholo") || lower.contains("open")) -> {
+                val res = toolExecutionEngine.executeTool(ZoyaToolCall("6", "openApp", mapOf("appName" to "chrome")))
+                liveSessionManager.sendTextPrompt("Opened Chrome: ${res.message}")
+            }
+            lower.contains("settings") && (lower.contains("kholo") || lower.contains("open")) -> {
+                val res = toolExecutionEngine.executeTool(ZoyaToolCall("7", "openSettings", mapOf("settingType" to "all")))
+                liveSessionManager.sendTextPrompt("Opened Settings: ${res.message}")
+            }
+            lower.contains("wifi") || lower.contains("wi-fi") -> {
+                val res = toolExecutionEngine.executeTool(ZoyaToolCall("8", "openSettings", mapOf("settingType" to "wifi")))
+                liveSessionManager.sendTextPrompt("Wi-Fi Settings: ${res.message}")
+            }
+            lower.contains("bluetooth") -> {
+                val res = toolExecutionEngine.executeTool(ZoyaToolCall("9", "openSettings", mapOf("settingType" to "bluetooth")))
+                liveSessionManager.sendTextPrompt("Bluetooth Settings: ${res.message}")
+            }
+            lower.contains("battery") -> {
+                val res = toolExecutionEngine.executeTool(ZoyaToolCall("10", "openSettings", mapOf("settingType" to "battery")))
+                liveSessionManager.sendTextPrompt("Battery Settings: ${res.message}")
+            }
+            lower.contains("notification") && (lower.contains("padho") || lower.contains("batao") || lower.contains("read")) -> {
+                val res = toolExecutionEngine.executeTool(ZoyaToolCall("11", "readLatestNotification", emptyMap()))
+                liveSessionManager.sendTextPrompt("Read Notification: ${res.message}")
+            }
+            lower.contains("call") || lower.contains("phone lagao") -> {
+                val name = lower.substringAfter("call").substringAfter("to").trim()
+                if (name.isNotBlank()) {
+                    val res = toolExecutionEngine.executeTool(ZoyaToolCall("12", "searchAndCallContact", mapOf("contactName" to name)))
+                    liveSessionManager.sendTextPrompt(res.message)
+                } else {
+                    liveSessionManager.sendTextPrompt(commandText)
+                }
+            }
+            lower == "stop" || lower == "ruk jao" || lower == "chup" -> {
+                interruptZoya()
+            }
+            else -> {
+                liveSessionManager.sendTextPrompt(commandText)
+            }
+        }
+    }
+
+    fun confirmPendingAction() {
+        val action = _pendingConfirmation.value ?: return
+        action.onConfirm()
+        _pendingConfirmation.value = null
+    }
+
+    fun cancelPendingAction() {
+        val action = _pendingConfirmation.value ?: return
+        action.onCancel()
+        _pendingConfirmation.value = null
+    }
+
+    fun answerIncomingCall() {
+        toolExecutionEngine.executeTool(ZoyaToolCall("c1", "handleCallAction", mapOf("action" to "pick")))
+    }
+
+    fun endIncomingCall() {
+        toolExecutionEngine.executeTool(ZoyaToolCall("c2", "handleCallAction", mapOf("action" to "disconnect")))
+    }
+
+    fun silenceIncomingCall() {
+        toolExecutionEngine.executeTool(ZoyaToolCall("c3", "handleCallAction", mapOf("action" to "silent")))
     }
 
     fun retryConnection() {

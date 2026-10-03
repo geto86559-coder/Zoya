@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.Phone
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Send
@@ -102,6 +103,10 @@ fun LiveVoiceScreen(
     val transcript by viewModel.liveTranscript.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
     val hasMicPermission by viewModel.hasMicPermission.collectAsState()
+    val isScreenAssistantActive by viewModel.isScreenAssistantActive.collectAsState()
+    val incomingCall by viewModel.incomingCall.collectAsState()
+    val pendingConfirmation by viewModel.pendingConfirmation.collectAsState()
+    val announcementText by viewModel.announcementText.collectAsState()
 
     var showTextInputDialog by remember { mutableStateOf(false) }
     var textPromptInput by remember { mutableStateOf("") }
@@ -109,10 +114,12 @@ fun LiveVoiceScreen(
     val characterRenderer = remember { ComposeZoyaCharacterRenderer() }
 
     val quickChips = listOf(
-        "Haan boss, bolo 😏" to "Haan boss, kya haal hai?",
-        "Funny one-liner sunao 🎭" to "Ek mazedaar one liner sunao Zoya!",
+        "YouTube kholo ▶" to "YouTube kholo",
+        "WhatsApp kholo 💬" to "WhatsApp kholo",
+        "Messages padho 🔔" to "Jo notification aayi hai batao",
+        "Wi-Fi settings 📶" to "Wi-Fi settings kholo",
         "Time & Date ⌚" to "Aaj ka exact time aur date batao",
-        "Part 1 Status 🚀" to "Tumhari kya capabilities ready hain?"
+        "Funny joke sunao 😏" to "Ek mazedaar one liner sunao Zoya!"
     )
 
     Box(
@@ -176,6 +183,23 @@ fun LiveVoiceScreen(
                     )
                 }
 
+                if (isScreenAssistantActive) {
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(CyberGreen.copy(alpha = 0.2f))
+                            .border(1.dp, CyberGreen.copy(alpha = 0.6f), RoundedCornerShape(14.dp))
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = "Screen Assistant: ON",
+                            color = CyberGreen,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
                 // Controls: Mode switch & Privacy Settings
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     // Mode Switch: Anime Character vs Cyber Orb
@@ -211,6 +235,92 @@ fun LiveVoiceScreen(
                             tint = NeonMagenta
                         )
                     }
+                }
+            }
+
+            // INCOMING CALL CARD ASSISTANT (Section 7)
+            if (incomingCall != null) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 6.dp)
+                        .testTag("incoming_call_card"),
+                    colors = CardDefaults.cardColors(containerColor = DarkSurfaceElevated),
+                    shape = RoundedCornerShape(16.dp),
+                    border = CardDefaults.outlinedCardBorder().copy(
+                        brush = Brush.horizontalGradient(listOf(CyberGreen, NeonCyan))
+                    )
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(CircleShape)
+                                    .background(CyberGreen.copy(alpha = 0.2f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Phone,
+                                    contentDescription = null,
+                                    tint = CyberGreen,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Incoming Call", color = NeonCyan, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                Text(incomingCall!!.callerName, color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceEvenly
+                        ) {
+                            Button(
+                                onClick = { viewModel.answerIncomingCall() },
+                                colors = ButtonDefaults.buttonColors(containerColor = CyberGreen),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text("Pick karo", color = VoidBlack, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
+                            Button(
+                                onClick = { viewModel.silenceIncomingCall() },
+                                colors = ButtonDefaults.buttonColors(containerColor = CyberAmber),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text("Silent", color = VoidBlack, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
+                            Button(
+                                onClick = { viewModel.endIncomingCall() },
+                                colors = ButtonDefaults.buttonColors(containerColor = CyberRed),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Text("Disconnect", color = VoidBlack, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // VOICE ANNOUNCEMENT BANNER (Section 8)
+            if (announcementText != null) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(NeonPurple.copy(alpha = 0.2f))
+                        .border(1.dp, NeonPurple.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                ) {
+                    Text(
+                        text = "📢 ${announcementText!!}",
+                        color = TextPrimary,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium
+                    )
                 }
             }
 
@@ -353,7 +463,7 @@ fun LiveVoiceScreen(
                             .background(DarkSurfaceElevated)
                             .border(1.dp, DarkSurfaceHighlight, RoundedCornerShape(20.dp))
                             .clickable {
-                                viewModel.sendTextCommand(command)
+                                viewModel.handleVoiceOrTextCommand(command)
                             }
                             .padding(horizontal = 14.dp, vertical = 8.dp)
                     ) {
@@ -500,7 +610,7 @@ fun LiveVoiceScreen(
                             keyboardActions = KeyboardActions(
                                 onSend = {
                                     if (textPromptInput.isNotBlank()) {
-                                        viewModel.sendTextCommand(textPromptInput.trim())
+                                        viewModel.handleVoiceOrTextCommand(textPromptInput.trim())
                                         textPromptInput = ""
                                         showTextInputDialog = false
                                     }
@@ -513,7 +623,7 @@ fun LiveVoiceScreen(
                     Button(
                         onClick = {
                             if (textPromptInput.isNotBlank()) {
-                                viewModel.sendTextCommand(textPromptInput.trim())
+                                viewModel.handleVoiceOrTextCommand(textPromptInput.trim())
                                 textPromptInput = ""
                                 showTextInputDialog = false
                             }
@@ -527,6 +637,47 @@ fun LiveVoiceScreen(
                 dismissButton = {
                     TextButton(onClick = { showTextInputDialog = false }) {
                         Text("Cancel", color = TextSecondary)
+                    }
+                }
+            )
+        }
+
+        // LEVEL 2 CONFIRMATION SYSTEM DIALOG (Section 15)
+        if (pendingConfirmation != null) {
+            AlertDialog(
+                onDismissRequest = { viewModel.cancelPendingAction() },
+                containerColor = DarkSurfaceElevated,
+                title = {
+                    Text(
+                        text = pendingConfirmation!!.title,
+                        color = TextPrimary,
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                },
+                text = {
+                    Text(
+                        text = pendingConfirmation!!.description,
+                        color = TextSecondary,
+                        fontSize = 14.sp,
+                        lineHeight = 18.sp
+                    )
+                },
+                confirmButton = {
+                    Button(
+                        onClick = { viewModel.confirmPendingAction() },
+                        colors = ButtonDefaults.buttonColors(containerColor = NeonCyan),
+                        modifier = Modifier.testTag("confirm_action_button")
+                    ) {
+                        Text("Confirm ✓", color = VoidBlack, fontWeight = FontWeight.Bold)
+                    }
+                },
+                dismissButton = {
+                    TextButton(
+                        onClick = { viewModel.cancelPendingAction() },
+                        modifier = Modifier.testTag("cancel_action_button")
+                    ) {
+                        Text("Cancel ✕", color = TextSecondary)
                     }
                 }
             )

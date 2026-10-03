@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">Zoya Assistant</string>
+    <string name="accessibility_service_description">Zoya Screen Assistant helps warn you of mistakes before performing sensitive actions like deleting content or sending to the wrong contact.</string>
 </resources>

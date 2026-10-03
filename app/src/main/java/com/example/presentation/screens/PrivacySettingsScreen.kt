@@ -288,10 +288,21 @@ fun PrivacySettingsScreen(
                             privacyManager.setCapabilityEnabled(item.id, enabled)
                         },
                         onOpenSettings = {
-                            if (item.id == "floating_orb") {
-                                permissionManager.openOverlaySettings(context)
-                            } else {
-                                permissionManager.openAppSettings(context)
+                            when (item.id) {
+                                "floating_orb" -> permissionManager.openOverlaySettings(context)
+                                "notification_access" -> {
+                                    val intent = android.content.Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).apply {
+                                        flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK
+                                    }
+                                    context.startActivity(intent)
+                                }
+                                "screen_assistant" -> {
+                                    val intent = android.content.Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+                                        flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK
+                                    }
+                                    context.startActivity(intent)
+                                }
+                                else -> permissionManager.openAppSettings(context)
                             }
                         }
                     )
@@ -474,6 +485,29 @@ private fun CapabilityCard(
                                 modifier = Modifier.size(12.dp)
                             )
                         }
+                    }
+                }
+            }
+
+            if (item.id == "notification_access" || item.id == "screen_assistant") {
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onOpenSettings) {
+                        Text(
+                            text = if (item.id == "notification_access") "System Notification Settings" else "Enable Accessibility Service",
+                            fontSize = 11.sp,
+                            color = NeonCyan
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Icon(
+                            imageVector = Icons.Filled.OpenInNew,
+                            contentDescription = null,
+                            tint = NeonCyan,
+                            modifier = Modifier.size(12.dp)
+                        )
                     }
                 }
             }

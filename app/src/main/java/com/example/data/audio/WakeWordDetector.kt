@@ -19,34 +19,48 @@ class SoftwareWakeWordDetector : WakeWordDetector {
     override val isListening: StateFlow<Boolean> = _isListening
 
     private var onDetected: ((String) -> Unit)? = null
-    private var consecutiveVoiceFrames = 0
+    private var speechEnvelope = mutableListOf<Float>()
     private var lastTriggerTime = 0L
 
     override fun start(onWakeWordDetected: (String) -> Unit) {
         this.onDetected = onWakeWordDetected
         _isListening.value = true
-        consecutiveVoiceFrames = 0
+        speechEnvelope.clear()
     }
 
     override fun stop() {
         _isListening.value = false
         onDetected = null
+        speechEnvelope.clear()
     }
 
     override fun processChunk(chunk: AudioChunk) {
         if (!_isListening.value) return
 
-        // Energy and acoustic speech frame heuristic for hands-free wake trigger
-        if (chunk.rmsLevel > 0.22f) {
-            consecutiveVoiceFrames++
-            val now = System.currentTimeMillis()
-            if (consecutiveVoiceFrames in 3..6 && (now - lastTriggerTime > 3000)) {
-                lastTriggerTime = now
-                consecutiveVoiceFrames = 0
-                onDetected?.invoke("Hey Zoya")
+        val rms = chunk.rmsLevel
+        val now = System.currentTimeMillis()
+
+        if (rms > 0.08f) {
+            speechEnvelope.add(rms)
+            // Limit buffer to recent 15 frames (~500ms of utterance)
+            if (speechEnvelope.size > 15) {
+                speechEnvelope.removeAt(0)
+            }
+
+            // Check if envelope matches a 2-syllable peak pattern (Zo-ya)
+            if (speechEnvelope.size >= 8 && (now - lastTriggerTime > 2500)) {
+                val hasInitialBurst = speechEnvelope.take(4).any { it > 0.15f }
+                val hasSecondaryBurst = speechEnvelope.takeLast(4).any { it > 0.12f }
+                if (hasInitialBurst && hasSecondaryBurst) {
+                    lastTriggerTime = now
+                    speechEnvelope.clear()
+                    onDetected?.invoke("Zoya")
+                }
             }
         } else {
-            consecutiveVoiceFrames = maxOf(0, consecutiveVoiceFrames - 1)
+            if (speechEnvelope.isNotEmpty()) {
+                speechEnvelope.removeAt(0)
+            }
         }
     }
 }
