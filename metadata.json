@@ -1,0 +1,7 @@
+{
+  "name": "Zoya Assistant",
+  "description": "Zoya - Smart, witty, and playful voice-first AI assistant powered by Gemini Live",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
